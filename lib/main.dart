@@ -15,9 +15,9 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: MainScreen(),
-      home: TrekDetails(),
-      home: EcoCalculator(),
+      home: HomeScreen(),
+      // home: TrekDetails(),
+      // home: EcoCalculator(),
     );
   }
 }
