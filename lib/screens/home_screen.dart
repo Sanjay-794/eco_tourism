@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:eco_tourism/services/route_service.dart';
+import 'package:eco_tourism/services/trail_service.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -28,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   LatLng? currentLocation;
 
   List<LatLng> routePoints = [];
+  List<LatLng> highlightedTrailPoints = [];
 
   final MapController mapController = MapController();
 
@@ -37,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isSearching = false;
 
   Timer? debounce;
+
+  final TrailService _trailService = TrailService();
 
 
   /// search locations
@@ -160,6 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     };
                     weatherData = null;
                     routePoints = [];
+                    highlightedTrailPoints = [];
                   });
 
                   try {
@@ -167,14 +172,34 @@ class _HomeScreenState extends State<HomeScreen> {
                     final weather = await WeatherService()
                         .getWeather(point.latitude, point.longitude);
 
-                    final route = await RouteService().getRoute(
-                      currentLocation!,
-                      LatLng(point.latitude, point.longitude),
-                    );
+                    final prototypeRoute = currentLocation != null
+                        ? await _trailService.getPrototypeTrailRoute(
+                            currentLocation!,
+                            point,
+                          )
+                        : <LatLng>[];
+
+                    final nearestTrail = await _resolveTrailHighlight(point);
+
+                    List<LatLng> resolvedRoute = prototypeRoute;
+                    List<LatLng> resolvedTrail = nearestTrail;
+
+                    if (resolvedRoute.isEmpty && currentLocation != null) {
+                      try {
+                        resolvedRoute = await RouteService().getRoute(
+                          currentLocation!,
+                          LatLng(point.latitude, point.longitude),
+                        );
+                      } catch (_) {
+                        resolvedRoute = [];
+                      }
+
+                    }
 
                     setState(() {
                       weatherData = weather;
-                      routePoints = route;
+                      routePoints = resolvedRoute;
+                      highlightedTrailPoints = resolvedTrail;
                     });
 
                   } catch (e) {
@@ -185,22 +210,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
               children: [
 
-                /// OpenTopoMap tiles (better suited for hiking/trekking terrain)
+                /// Pure OpenStreetMap base layer.
                 TileLayer(
-                  urlTemplate: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+                  urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                   subdomains: const ['a', 'b', 'c'],
-                  maxNativeZoom: 17,
-                  maxZoom: 17,
+                  maxNativeZoom: 19,
+                  maxZoom: 19,
                   userAgentPackageName: 'com.example.eco_tourism',
                 ),
 
-                /// ================= WAYMARKED TRAILS OVERLAY =================
-                /// Displays hiking trails from OpenStreetMap Waymarked Trails
-                TileLayer(
-                  urlTemplate: "https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png",
-                  maxZoom: 18,
-                  userAgentPackageName: 'com.example.eco_tourism',
-                  tileDimension: 256,
+                /// Highlights selected trek as red dashed-style path.
+                PolylineLayer<Object>(
+                  polylines: _buildDashedTrailPolylines(highlightedTrailPoints),
                 ),
 
                 /// ================= ROUTE TO TRAIL START =================
@@ -293,14 +314,35 @@ class _HomeScreenState extends State<HomeScreen> {
                                 final weather = await WeatherService()
                                     .getWeather(data['lat'], data['lng']);
 
-                                final route = await RouteService().getRoute(
-                                  currentLocation!,
-                                  LatLng(data['lat'], data['lng']),
-                                );
+                                final targetPoint = LatLng(data['lat'], data['lng']);
+                                final prototypeRoute = currentLocation != null
+                                    ? await _trailService.getPrototypeTrailRoute(
+                                        currentLocation!,
+                                        targetPoint,
+                                      )
+                                    : <LatLng>[];
+
+                                final nearestTrail = await _resolveTrailHighlight(targetPoint);
+
+                                List<LatLng> resolvedRoute = prototypeRoute;
+                                List<LatLng> resolvedTrail = nearestTrail;
+
+                                if (resolvedRoute.isEmpty && currentLocation != null) {
+                                  try {
+                                    resolvedRoute = await RouteService().getRoute(
+                                      currentLocation!,
+                                      targetPoint,
+                                    );
+                                  } catch (_) {
+                                    resolvedRoute = [];
+                                  }
+
+                                }
 
                                 setState(() {
                                   weatherData = weather;
-                                  routePoints = route;
+                                  routePoints = resolvedRoute;
+                                  highlightedTrailPoints = resolvedTrail;
                                 });
                               } catch (e) {
                                 print(e);
@@ -426,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
-                      'Map data: OpenStreetMap contributors, SRTM | Map style: OpenTopoMap',
+                      'Map data: OpenStreetMap contributors | Base map: OpenStreetMap Standard',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -561,22 +603,41 @@ class _HomeScreenState extends State<HomeScreen> {
                               // 🔥 ADD THESE
                               weatherData = null;
                               routePoints = [];
+                              highlightedTrailPoints = [];
                             });
 
                             try {
                               final weather = await WeatherService()
                                   .getWeather(lat, lng);
 
-                              if (currentLocation == null) return;
+                              final prototypeRoute = currentLocation != null
+                                  ? await _trailService.getPrototypeTrailRoute(
+                                      currentLocation!,
+                                      point,
+                                    )
+                                  : <LatLng>[];
 
-                              final route = await RouteService().getRoute(
-                                currentLocation!,
-                                point,
-                              );
+                              final nearestTrail = await _resolveTrailHighlight(point);
+
+                              List<LatLng> resolvedRoute = prototypeRoute;
+                              List<LatLng> resolvedTrail = nearestTrail;
+
+                              if (resolvedRoute.isEmpty && currentLocation != null) {
+                                try {
+                                  resolvedRoute = await RouteService().getRoute(
+                                    currentLocation!,
+                                    point,
+                                  );
+                                } catch (_) {
+                                  resolvedRoute = [];
+                                }
+
+                              }
 
                               setState(() {
                                 weatherData = weather;
-                                routePoints = route;
+                                routePoints = resolvedRoute;
+                                highlightedTrailPoints = resolvedTrail;
                               });
 
                             } catch (e) {
@@ -725,6 +786,53 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
 
     );
+  }
+
+  Future<List<LatLng>> _resolveTrailHighlight(LatLng point) async {
+    const radii = [2200, 3500, 5000];
+
+    for (final radius in radii) {
+      final endToEnd = await _trailService.getEndToEndTrailPath(
+        point,
+        radiusMeters: radius,
+        maxSnapDistanceMeters: 450,
+      );
+      if (endToEnd.length > 1) {
+        return endToEnd;
+      }
+    }
+
+    for (final radius in radii) {
+      final nearest = await _trailService.getNearestHikingTrail(
+        point,
+        radiusMeters: radius,
+        maxSnapDistanceMeters: 550,
+      );
+      if (nearest.length > 1) {
+        return nearest;
+      }
+    }
+
+    return [];
+  }
+
+  List<Polyline<Object>> _buildDashedTrailPolylines(List<LatLng> points) {
+    if (points.length < 2) {
+      return const [];
+    }
+
+    final dashed = <Polyline<Object>>[];
+    for (var i = 0; i < points.length - 1; i += 2) {
+      dashed.add(
+        Polyline(
+          points: [points[i], points[i + 1]],
+          strokeWidth: 6,
+          color: Colors.redAccent,
+        ),
+      );
+    }
+
+    return dashed;
   }
 
   /// ================= CHIP WIDGET =================
