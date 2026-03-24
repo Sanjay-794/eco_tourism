@@ -10,7 +10,7 @@ class HomeScreen extends StatelessWidget {
       body: Stack(
         children: [
 
-          /// BACKGROUND IMAGE
+          /// BACKGROUND
           Positioned.fill(
             child: Image.asset(
               "assets/bg.jpg",
@@ -18,7 +18,6 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
 
-          /// DARK OVERLAY
           Positioned.fill(
             child: Container(
               color: Colors.black.withOpacity(0.6),
@@ -38,13 +37,15 @@ class HomeScreen extends StatelessWidget {
                         MainAxisAlignment.spaceBetween,
                     children: [
 
-                      Icon(Icons.menu, color: Colors.greenAccent),
+                      const Icon(
+                        Icons.menu,
+                        color: Colors.greenAccent,
+                      ),
 
                       const Text(
                         "TRAILSAFE",
                         style: TextStyle(
                           color: Colors.greenAccent,
-                          fontSize: 18,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 2,
                         ),
@@ -53,13 +54,14 @@ class HomeScreen extends StatelessWidget {
                       const CircleAvatar(
                         backgroundImage:
                             NetworkImage(
-                                "https://i.pravatar.cc/100"),
+                          "https://i.pravatar.cc/100",
+                        ),
                       )
                     ],
                   ),
                 ),
 
-                /// SEARCH BAR
+                /// SEARCH
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Container(
@@ -75,13 +77,18 @@ class HomeScreen extends StatelessWidget {
                       style: TextStyle(
                           color: Colors.white),
                       decoration: InputDecoration(
-                        icon: Icon(Icons.search,
-                            color: Colors.white54),
+                        icon: Icon(
+                          Icons.search,
+                          color: Colors.white54,
+                        ),
                         hintText:
-                            "Search trails, peaks, or campsites...",
-                        hintStyle: TextStyle(
-                            color: Colors.white54),
-                        border: InputBorder.none,
+                            "Search trails...",
+                        hintStyle:
+                            TextStyle(
+                                color:
+                                    Colors.white54),
+                        border:
+                            InputBorder.none,
                       ),
                     ),
                   ),
@@ -91,136 +98,113 @@ class HomeScreen extends StatelessWidget {
 
                 /// BOTTOM CARD
                 Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.all(16),
+                  margin:
+                      const EdgeInsets.all(16),
+                  padding:
+                      const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.black87,
                     borderRadius:
-                        BorderRadius.circular(20),
+                        BorderRadius.circular(
+                            20),
                   ),
                   child: Column(
                     crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                        CrossAxisAlignment
+                            .start,
                     children: [
 
                       const Text(
                         "Hidden Waterfall Trail",
                         style: TextStyle(
-                          color: Colors.white,
+                          color:
+                              Colors.white,
                           fontSize: 18,
                           fontWeight:
                               FontWeight.bold,
                         ),
                       ),
 
-                      const SizedBox(height: 6),
+                      const SizedBox(
+                          height: 6),
 
                       Row(
                         mainAxisAlignment:
                             MainAxisAlignment
                                 .spaceBetween,
-                        children: [
+                        children: const [
 
-                          const Text(
+                          Text(
                             "SAFE STATUS",
-                            style: TextStyle(
-                              color:
-                                  Colors.greenAccent,
+                            style:
+                                TextStyle(
+                              color: Colors
+                                  .greenAccent,
                             ),
                           ),
 
-                          const Text(
+                          Text(
                             "4.2 mi",
-                            style: TextStyle(
-                              color:
-                                  Colors.greenAccent,
-                              fontSize: 18,
+                            style:
+                                TextStyle(
+                              color: Colors
+                                  .greenAccent,
                               fontWeight:
-                                  FontWeight.bold,
+                                  FontWeight
+                                      .bold,
                             ),
                           ),
                         ],
                       ),
 
-                      const SizedBox(height: 12),
+                      const SizedBox(
+                          height: 12),
 
                       Row(
                         mainAxisAlignment:
                             MainAxisAlignment
                                 .spaceBetween,
                         children: [
-
                           _chip("68°F"),
                           _chip("Difficulty"),
-                          _chip("Cell Service"),
+                          _chip(
+                              "Cell Service"),
                         ],
                       ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(
+                          height: 12),
 
                       ElevatedButton(
                         style:
-                            ElevatedButton.styleFrom(
+                            ElevatedButton
+                                .styleFrom(
                           backgroundColor:
-                              Colors.greenAccent,
+                              Colors
+                                  .greenAccent,
                           minimumSize:
-                              const Size.fromHeight(
-                                  50),
-                          shape:
-                              RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                    30),
-                          ),
+                              const Size
+                                  .fromHeight(
+                                      45),
                         ),
                         onPressed: () {},
-                        child: const Text(
+                        child:
+                            const Text(
                           "CHECK-IN",
-                          style: TextStyle(
-                              color: Colors.black,
-                              fontWeight:
-                                  FontWeight.bold),
+                          style:
+                              TextStyle(
+                            color:
+                                Colors
+                                    .black,
+                          ),
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),
-
-                /// BOTTOM NAV
-                Container(
-                  height: 70,
-                  decoration:
-                      const BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius:
-                        BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment
-                            .spaceAround,
-                    children: const [
-
-                      Icon(Icons.home,
-                          color:
-                              Colors.greenAccent),
-                      Icon(Icons.map,
-                          color:
-                              Colors.white54),
-                      Icon(Icons.warning,
-                          color:
-                              Colors.white54),
-                      Icon(Icons.eco,
-                          color:
-                              Colors.white54),
-                    ],
-                  ),
-                )
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -230,16 +214,18 @@ class HomeScreen extends StatelessWidget {
     return Container(
       padding:
           const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 8),
+              horizontal: 10,
+              vertical: 6),
       decoration: BoxDecoration(
         color: Colors.black54,
         borderRadius:
-            BorderRadius.circular(12),
+            BorderRadius.circular(
+                12),
       ),
       child: Text(
         text,
-        style:
-            const TextStyle(color: Colors.white),
+        style: const TextStyle(
+            color: Colors.white),
       ),
     );
   }

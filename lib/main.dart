@@ -4,6 +4,7 @@ import 'screens/home_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/trek_details.dart';
 import 'screens/eco_calculator.dart';
+import 'screens/navigation_screen.dart';
 void main() {
   runApp(const MyApp());
 }
@@ -15,7 +16,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: HomeScreen(),
+      home: NavigationScreen(),
       // home: TrekDetails(),
       // home: EcoCalculator(),
     );
