@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "207857875468",
+    "project_id": "trail-safe-8933a",
+    "storage_bucket": "trail-safe-8933a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:207857875468:android:465b1cedf803b460870c29",
+        "android_client_info": {
+          "package_name": "com.example.eco_tourism"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2LRfVugCu_dQJnTjIkO1BqFSFTeVFfOE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
