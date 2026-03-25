@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:eco_tourism/services/weather_service.dart';
+import 'package:eco_tourism/screens/main_screen.dart';
+import 'package:eco_tourism/services/checkin_service.dart';
+import 'package:eco_tourism/widgets/app_navigation_drawer.dart';
+import 'package:eco_tourism/widgets/custom_app_bar.dart';
 
 class TrekDetails extends StatefulWidget {
   const TrekDetails({super.key});
@@ -12,13 +18,37 @@ class TrekDetails extends StatefulWidget {
 
 class _TrekDetailsState extends State<TrekDetails> {
   String? _expandedTrailId;
+  String? _checkedInTrailId;
   final Map<String, Map<String, dynamic>?> _weatherByTrailId = {};
   final Set<String> _weatherLoading = {};
+  Timer? _blinkTimer;
+  bool _alertVisible = true;
 
   @override
   void initState() {
     super.initState();
     _logSingleFetchStatus();
+    _loadCheckedInTrailId();
+    _blinkTimer = Timer.periodic(const Duration(milliseconds: 650), (_) {
+      if (!mounted) return;
+      setState(() {
+        _alertVisible = !_alertVisible;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _blinkTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadCheckedInTrailId() async {
+    final checkedId = await CheckInService.getCheckedInTrailId();
+    if (!mounted) return;
+    setState(() {
+      _checkedInTrailId = checkedId;
+    });
   }
 
   Future<void> _loadWeatherForTrail(
@@ -144,6 +174,60 @@ class _TrekDetailsState extends State<TrekDetails> {
     return '--';
   }
 
+  int _rainPercentValue(Map<String, dynamic>? weather) {
+    if (weather == null) return 0;
+
+    final rain = weather['rain'];
+    if (rain is Map && rain['1h'] != null) {
+      final mm = (rain['1h'] as num).toDouble();
+      return (mm * 20).clamp(0, 100).round();
+    }
+
+    final weatherList = weather['weather'];
+    if (weatherList is List && weatherList.isNotEmpty) {
+      final condition = (weatherList.first['main'] ?? '').toString();
+      if (condition == 'Thunderstorm') return 90;
+      if (condition == 'Rain') return 70;
+      if (condition == 'Drizzle') return 40;
+      if (condition == 'Snow') return 75;
+    }
+
+    final clouds = weather['clouds'];
+    if (clouds is Map && clouds['all'] != null) {
+      return (clouds['all'] as num).round().clamp(0, 100);
+    }
+
+    return 0;
+  }
+
+  bool _hasSevereWeather(Map<String, dynamic>? weather) {
+    if (weather == null) return false;
+    final temp = ((weather['main'] as Map?)?['temp'] as num?)?.toDouble();
+    final rainPercent = _rainPercentValue(weather);
+
+    final veryLowTemp = temp != null && temp < 0;
+    final heavyRain = rainPercent > 60;
+    return veryLowTemp || heavyRain;
+  }
+
+  String _alertReason(Map<String, dynamic>? weather) {
+    if (weather == null) return 'Unsafe weather conditions';
+
+    final temp = ((weather['main'] as Map?)?['temp'] as num?)?.toDouble();
+    final rainPercent = _rainPercentValue(weather);
+
+    if (temp != null && temp < 0 && rainPercent > 60) {
+      return 'Temp below 0°C and rain $rainPercent%';
+    }
+    if (temp != null && temp < 0) {
+      return 'Temperature dropped below 0°C';
+    }
+    if (rainPercent > 60) {
+      return 'Heavy rain expected ($rainPercent%)';
+    }
+    return 'Unsafe weather conditions';
+  }
+
   IconData _conditionIcon(Map<String, dynamic>? weather) {
     final condition = _conditionLabel(weather);
     if (condition == 'Rain' || condition == 'Drizzle') {
@@ -194,61 +278,87 @@ class _TrekDetailsState extends State<TrekDetails> {
     }
   }
 
-  void _showEmergencyInfo() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF111827),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+  void _openEmergencyScreen(
+    String trailId,
+    String trailName,
+    dynamic emergencyData,
+  ) {
+    final parsedEmergencyData = emergencyData is Map<String, dynamic>
+        ? emergencyData
+        : null;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MainScreen(
+          trailId: trailId,
+          trailName: trailName,
+          emergencyData: parsedEmergencyData,
+        ),
       ),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Text(
-                'Emergency Info',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Police: 100\nAmbulance: 108\nDisaster Helpline: 1070',
-                style: TextStyle(color: Colors.white70, height: 1.5),
-              ),
-              SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
     );
   }
 
-  Future<void> _checkIn(String trailId) async {
-    final firestore = FirebaseFirestore.instance;
-    final trailRef = firestore.collection('trails').doc(trailId);
-    final checkinRef = firestore.collection('checkins').doc();
-
-    final batch = firestore.batch();
-    batch.update(trailRef, {
-      'checkInCount': FieldValue.increment(1),
-      'lastUpdated': Timestamp.now(),
-    });
-    batch.set(checkinRef, {
-      'trailId': trailId,
-      'timestamp': Timestamp.now(),
-    });
-
-    await batch.commit();
-
+  Future<void> _checkIn(String trailId, String trailName) async {
+    final result = await CheckInService.checkInOnce(
+      trailId,
+      trailName: trailName,
+    );
     if (!mounted) return;
+
+    if (result == CheckInResult.success) {
+      setState(() {
+        _checkedInTrailId = trailId;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checked in to $trailName. Alerts are now enabled.')),
+      );
+      return;
+    }
+
+    if (result == CheckInResult.alreadyCheckedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Already checked in to $trailName.')),
+      );
+      return;
+    }
+
+    if (result == CheckInResult.alreadyCheckedAnotherTrail) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You can only have one active check-in. Undo current check-in from My Activity first.'),
+        ),
+      );
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Checked in successfully')),
+      const SnackBar(content: Text('Unable to check in right now.')),
+    );
+  }
+
+  Future<void> _undoCheckIn(String trailId) async {
+    final result = await CheckInService.undoCheckIn(trailId);
+    if (!mounted) return;
+
+    if (result == UndoCheckInResult.success) {
+      setState(() {
+        _checkedInTrailId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Check-in undone. You can check in another trek now.')),
+      );
+      return;
+    }
+
+    if (result == UndoCheckInResult.notCheckedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This trek is not currently active for this device.')),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to undo check-in right now.')),
     );
   }
 
@@ -264,9 +374,10 @@ class _TrekDetailsState extends State<TrekDetails> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: const Text('Trails'),
+      drawer: const AppNavigationDrawer(),
+      appBar: CustomAppBar(
+        title: 'TRAILS',
+        onMenuTap: () => Scaffold.of(context).openDrawer(),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
@@ -337,6 +448,10 @@ class _TrekDetailsState extends State<TrekDetails> {
               final status = _safetyFromWeather(baseStatus, weather);
               final statusColor = _statusColor(status);
               final isExpanded = _expandedTrailId == doc.id;
+              final isCheckedByThisDevice = _checkedInTrailId == doc.id;
+              final isCheckLocked =
+                  _checkedInTrailId != null && _checkedInTrailId != doc.id;
+              final showAlert = _hasSevereWeather(weather);
 
               String weatherText = '--';
               if (weatherLoading) {
@@ -402,6 +517,65 @@ class _TrekDetailsState extends State<TrekDetails> {
                           ),
                         ],
                       ),
+                      if (isCheckedByThisDevice)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8, bottom: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.cyanAccent.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.verified, size: 16, color: Colors.cyanAccent),
+                              SizedBox(width: 6),
+                              Text(
+                                'Checked in',
+                                style: TextStyle(
+                                  color: Colors.cyanAccent,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (showAlert)
+                        AnimatedOpacity(
+                          opacity: _alertVisible ? 1 : 0.28,
+                          duration: const Duration(milliseconds: 320),
+                          child: Container(
+                            margin: const EdgeInsets.only(top: 8, bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.7)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Colors.redAccent,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'ALERT: ${_alertReason(weather)}',
+                                    style: const TextStyle(
+                                      color: Colors.redAccent,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -561,12 +735,31 @@ class _TrekDetailsState extends State<TrekDetails> {
                         const SizedBox(height: 14),
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.greenAccent,
-                            foregroundColor: Colors.black,
+                            backgroundColor: isCheckedByThisDevice
+                                ? Colors.orangeAccent
+                                : isCheckLocked
+                                    ? Colors.grey
+                                    : Colors.greenAccent,
+                            foregroundColor:
+                                isCheckedByThisDevice || isCheckLocked ? Colors.white70 : Colors.black,
                             minimumSize: const Size.fromHeight(44),
                           ),
-                          onPressed: () => _checkIn(doc.id),
-                          child: const Text('CHECK-IN'),
+                          onPressed: isCheckLocked
+                              ? null
+                              : () {
+                                  if (isCheckedByThisDevice) {
+                                    _undoCheckIn(doc.id);
+                                  } else {
+                                    _checkIn(doc.id, name);
+                                  }
+                                },
+                          child: Text(
+                            isCheckedByThisDevice
+                                ? 'UNDO CHECK-IN'
+                                : isCheckLocked
+                                    ? 'CHECK-IN LOCKED'
+                                    : 'CHECK-IN',
+                          ),
                         ),
                         const SizedBox(height: 8),
                         OutlinedButton(
@@ -574,7 +767,8 @@ class _TrekDetailsState extends State<TrekDetails> {
                             minimumSize: const Size.fromHeight(42),
                             side: const BorderSide(color: Colors.white30),
                           ),
-                          onPressed: _showEmergencyInfo,
+                          onPressed: () =>
+                              _openEmergencyScreen(doc.id, name, data['emergency']),
                           child: const Text(
                             'VIEW EMERGENCY INFO',
                             style: TextStyle(color: Colors.white),

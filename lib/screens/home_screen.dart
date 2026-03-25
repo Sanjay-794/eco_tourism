@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:eco_tourism/services/route_service.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:eco_tourism/services/checkin_service.dart';
+import 'package:eco_tourism/widgets/app_navigation_drawer.dart';
 
 /// Main Screen Widget
 class HomeScreen extends StatefulWidget {
@@ -37,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isSearching = false;
 
   Timer? debounce;
+  String? _checkedInTrailId;
 
 
   /// search locations
@@ -93,21 +96,137 @@ class _HomeScreenState extends State<HomeScreen> {
       return selectedTrail?["baseStatus"] ?? "SAFE";
     }
 
-    final condition = weatherData!['weather'][0]['main'];
+    final temp = _temperatureValue(weatherData);
+    final rainPercent = _rainPercentValue(weatherData);
+    final condition = _conditionLabel(weatherData);
 
-    if (condition == "Rain" || condition == "Thunderstorm") {
-      return "DANGER";
-    } else if (condition == "Clouds") {
-      return "CAUTION";
-    } else {
-      return "SAFE";
+    var severity = 0; // 0=SAFE, 1=RISKY, 2=DANGER
+
+    // Temperature rule: >10 SAFE, >5 RISKY, <=5 DANGER.
+    if (temp != null) {
+      if (temp <= 5) {
+        severity = 2;
+      } else if (temp <= 10) {
+        severity = severity < 1 ? 1 : severity;
+      }
     }
+
+    // Rain percentage contribution.
+    if (rainPercent >= 70) {
+      severity = 2;
+    } else if (rainPercent >= 40) {
+      severity = severity < 1 ? 1 : severity;
+    }
+
+    // Other weather condition contribution.
+    if (condition == "Thunderstorm" || condition == "Snow") {
+      severity = 2;
+    } else if (condition == "Rain" ||
+        condition == "Drizzle" ||
+        condition == "Clouds" ||
+        condition == "Mist" ||
+        condition == "Fog" ||
+        condition == "Haze") {
+      severity = severity < 1 ? 1 : severity;
+    }
+
+    if (severity == 2) return "DANGER";
+    if (severity == 1) return "RISKY";
+    return "SAFE";
+  }
+
+  String _conditionLabel(Map<String, dynamic>? weather) {
+    if (weather == null) return '';
+    final weatherList = weather['weather'];
+    if (weatherList is List && weatherList.isNotEmpty) {
+      return (weatherList.first['main'] ?? '').toString();
+    }
+    return '';
+  }
+
+  double? _temperatureValue(Map<String, dynamic>? weather) {
+    if (weather == null) return null;
+    final main = weather['main'];
+    if (main is Map && main['temp'] != null) {
+      return (main['temp'] as num).toDouble();
+    }
+    return null;
+  }
+
+  int _rainPercentValue(Map<String, dynamic>? weather) {
+    if (weather == null) return 0;
+
+    final rain = weather['rain'];
+    if (rain is Map && rain['1h'] != null) {
+      final mm = (rain['1h'] as num).toDouble();
+      return (mm * 20).clamp(0, 100).round();
+    }
+
+    final weatherList = weather['weather'];
+    if (weatherList is List && weatherList.isNotEmpty) {
+      final condition = (weatherList.first['main'] ?? '').toString();
+      if (condition == 'Thunderstorm') return 90;
+      if (condition == 'Rain') return 70;
+      if (condition == 'Drizzle') return 40;
+      if (condition == 'Snow') return 75;
+    }
+
+    final clouds = weather['clouds'];
+    if (clouds is Map && clouds['all'] != null) {
+      return (clouds['all'] as num).round().clamp(0, 100);
+    }
+
+    return 0;
   }
 
   @override
   void initState() {
     super.initState();
     _getLocation();
+    _loadCheckedInTrailId();
+  }
+
+  Future<void> _loadCheckedInTrailId() async {
+    final checkedId = await CheckInService.getCheckedInTrailId();
+    if (!mounted) return;
+    setState(() {
+      _checkedInTrailId = checkedId;
+    });
+  }
+
+  Future<void> _undoCheckInForSelectedTrail(BuildContext context) async {
+    if (selectedTrail == null) return;
+    final trailId = selectedTrail!['id']?.toString();
+    if (trailId == null || trailId.isEmpty) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await CheckInService.undoCheckIn(trailId);
+
+    if (!context.mounted) return;
+
+    if (result == UndoCheckInResult.success) {
+      setState(() {
+        _checkedInTrailId = null;
+        final raw = selectedTrail!['checkInCount'];
+        final current = raw is int ? raw : int.tryParse(raw?.toString() ?? '') ?? 0;
+        selectedTrail!['checkInCount'] = current > 0 ? current - 1 : 0;
+      });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Check-in undone. You can check in another trek now.')),
+      );
+      return;
+    }
+
+    if (result == UndoCheckInResult.notCheckedIn) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('This trek is not currently checked in on this device.')),
+      );
+      return;
+    }
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Unable to undo check-in right now.')),
+    );
   }
 
   Future<void> _getLocation() async {
@@ -138,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      drawer: const AppNavigationDrawer(),
 
       /// Using Stack to layer map + UI + overlay
       body: Stack(
@@ -312,11 +432,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Icon(
                                   Icons.location_on,
                                   size: 35,
-                                  color: (data['checkInCount'] ?? 0) > 10
+                                  color: doc.id == _checkedInTrailId
+                                    ? Colors.cyanAccent
+                                    : (data['checkInCount'] ?? 0) > 10
                                       ? Colors.red
                                       : (data['checkInCount'] ?? 0) > 5
-                                          ? Colors.yellow
-                                          : Colors.green,
+                                        ? Colors.yellow
+                                        : Colors.green,
                                 ),
                                 Container(
                                   padding: const EdgeInsets.all(4),
@@ -400,7 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 //           size: 35,
                 //           color: trail["status"] == "Safe"
                 //               ? Colors.green
-                //               : trail["status"] == "Caution"
+                //               : trail["status"] == "Risky"
                 //               ? Colors.yellow
                 //               : Colors.red,
                 //         ),
@@ -465,13 +587,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: const [
+                    children: [
 
                       /// Menu Icon
-                      Icon(Icons.menu, color: Colors.greenAccent),
+                      Builder(
+                        builder: (context) => IconButton(
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                          icon: const Icon(Icons.menu, color: Colors.greenAccent),
+                        ),
+                      ),
 
                       /// App Title
-                      Text(
+                      const Text(
                         "TRAILSAFE",
                         style: TextStyle(
                           color: Colors.greenAccent,
@@ -481,8 +608,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
 
                       /// Profile Avatar
-                      CircleAvatar(
-                        backgroundImage: NetworkImage("https://i.pravatar.cc/100"),
+                      GestureDetector(
+                        onTap: () {
+                          debugPrint("Avatar clicked");
+                        },
+                        child: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.greenAccent,
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: Colors.black87,
+                            backgroundImage: NetworkImage(
+                              "https://static.vecteezy.com/system/resources/thumbnails/048/216/761/small/modern-male-avatar-with-black-hair-and-hoodie-illustration-free-png.png",
+                            ),
+                            onBackgroundImageError: (exception, stackTrace) {
+                              debugPrint("Avatar image failed to load: $exception");
+                            },
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -594,17 +737,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 /// ================= BOTTOM INFO CARD =================
                 /// Show only when a marker is selected
                 if (selectedTrail != null)
-                  Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final selectedTrailId = selectedTrail!['id']?.toString();
+                      final isSelectedChecked =
+                          selectedTrailId != null && selectedTrailId == _checkedInTrailId;
+                      final isLockedByOtherTrail = _checkedInTrailId != null &&
+                          selectedTrailId != null &&
+                          selectedTrailId != _checkedInTrailId;
 
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                      return Container(
+                        margin: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
 
                         /// Trail Name
                         Text(
@@ -628,6 +780,24 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
 
+                        const SizedBox(height: 4),
+                        Text(
+                          isSelectedChecked
+                              ? 'Status: Checked in from this device'
+                              : isLockedByOtherTrail
+                                  ? 'Status: Device already checked into another trail'
+                                  : 'Status: Not checked in',
+                          style: TextStyle(
+                            color: isSelectedChecked
+                                ? Colors.cyanAccent
+                                : isLockedByOtherTrail
+                                    ? Colors.orangeAccent
+                                    : Colors.white60,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+
                         /// Status + Distance Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -647,7 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(
                                 color: getSafetyStatus() == "SAFE"
                                     ? Colors.green
-                                    : getSafetyStatus() == "CAUTION"
+                                    : getSafetyStatus() == "RISKY"
                                     ? Colors.yellow
                                     : Colors.red,
                               ),
@@ -681,41 +851,109 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 12),
 
                         /// Action Button
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.greenAccent,
-                            minimumSize: const Size.fromHeight(45),
-                          ),
-                          onPressed: () async {
-                            if (selectedTrail == null) return;
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isSelectedChecked
+                                    ? Colors.orangeAccent
+                                    : isLockedByOtherTrail
+                                        ? Colors.grey
+                                        : Colors.greenAccent,
+                                minimumSize: const Size.fromHeight(45),
+                              ),
+                              onPressed: isLockedByOtherTrail
+                                  ? null
+                                  : () async {
+                                      if (selectedTrail == null) return;
+                                      final messenger = ScaffoldMessenger.of(context);
+                                      final trailName =
+                                          (selectedTrail!['name'] ?? locationName).toString();
 
-                            final trailId = selectedTrail!["id"];
+                                      if (isSelectedChecked) {
+                                        await _undoCheckInForSelectedTrail(context);
+                                        return;
+                                      }
 
-                            await FirebaseFirestore.instance
-                                .collection('trails')
-                                .doc(trailId)
-                                .update({
-                              'checkInCount': FieldValue.increment(1),
-                              'lastUpdated': Timestamp.now(),
-                            });
+                                      final trailId = selectedTrail!["id"];
 
-                            // 🔥 UPDATE LOCAL STATE ALSO
-                            setState(() {
-                              selectedTrail!['checkInCount'] =
-                                  (selectedTrail!['checkInCount'] ?? 0) + 1;
-                            });
+                                      if (trailId == null || trailId.toString().isEmpty) {
+                                        messenger.showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Please select a saved trail marker to check in.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
 
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Checked-in successfully 🚀")),
-                            );
-                          },
-                          child: const Text(
-                            "CHECK-IN",
-                            style: TextStyle(color: Colors.black),
-                          ),
+                                      final result = await CheckInService.checkInOnce(
+                                        trailId.toString(),
+                                        trailName: trailName,
+                                      );
+
+                                      if (!context.mounted) return;
+
+                                      if (result == CheckInResult.success) {
+                                        setState(() {
+                                          selectedTrail!['checkInCount'] =
+                                              (selectedTrail!['checkInCount'] ?? 0) + 1;
+                                          _checkedInTrailId = trailId.toString();
+                                        });
+                                        messenger.showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Checked in successfully. Trail alerts are now enabled.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      if (result == CheckInResult.alreadyCheckedIn) {
+                                        setState(() {
+                                          _checkedInTrailId = trailId.toString();
+                                        });
+                                        messenger.showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Already checked in from this device for this trail.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      if (result == CheckInResult.alreadyCheckedAnotherTrail) {
+                                        final checkedId = await CheckInService.getCheckedInTrailId();
+                                        if (!context.mounted) return;
+                                        setState(() {
+                                          _checkedInTrailId = checkedId;
+                                        });
+                                        messenger.showSnackBar(
+                                          const SnackBar(
+                                            content: Text('This device can check in to only one trail.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      messenger.showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Check-in failed. Please try again.'),
+                                        ),
+                                      );
+                                    },
+                              child: Text(
+                                isSelectedChecked
+                                    ? 'UNDO CHECK-IN'
+                                    : isLockedByOtherTrail
+                                        ? 'CHECK-IN LOCKED'
+                                        : 'CHECK-IN',
+                                style: TextStyle(
+                                  color: isLockedByOtherTrail || isSelectedChecked
+                                      ? Colors.white70
+                                      : Colors.black,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
               ],
             ),
