@@ -133,7 +133,6 @@ class _EcoCalculatorState extends State<EcoCalculator> {
         children: [
           CustomAppBar(
             title: 'ECO CALC',
-            onMenuTap: () => Scaffold.of(context).openDrawer(),
           ),
           Expanded(
             child: Stack(

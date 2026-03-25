@@ -359,7 +359,6 @@ class _TrekDetailsState extends State<TrekDetails> {
       drawer: const AppNavigationDrawer(),
       appBar: CustomAppBar(
         title: 'TRAILS',
-        onMenuTap: () => Scaffold.of(context).openDrawer(),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance

@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:eco_tourism/services/checkin_service.dart';
 import 'package:eco_tourism/widgets/app_navigation_drawer.dart';
+import 'package:eco_tourism/services/location_state_service.dart';
 
 /// Main Screen Widget
 class HomeScreen extends StatefulWidget {
@@ -243,11 +244,21 @@ class _HomeScreenState extends State<HomeScreen> {
       permission = await Geolocator.requestPermission();
     }
 
-    final position = await Geolocator.getCurrentPosition();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+      timeLimit: const Duration(seconds: 12),
+    );
 
     setState(() {
       currentLocation = LatLng(position.latitude, position.longitude);
     });
+
+    LocationStateService.setLastLocation(position.latitude, position.longitude);
 
     // ✅ Move map AFTER getting location
     mapController.move(currentLocation!, 13);

@@ -6,6 +6,16 @@ import 'package:eco_tourism/screens/plan_trek_screen.dart';
 class AppNavigationDrawer extends StatelessWidget {
   const AppNavigationDrawer({super.key});
 
+  void _navigateFromDrawer(BuildContext context, Widget page) {
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    Navigator.of(context).pop();
+
+    // Wait for drawer close animation to finish before pushing the next page.
+    Future.delayed(const Duration(milliseconds: 220), () {
+      rootNavigator.push(MaterialPageRoute(builder: (_) => page));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -32,10 +42,7 @@ class AppNavigationDrawer extends StatelessWidget {
                 style: TextStyle(color: Colors.white60),
               ),
               onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MyActivityScreen()),
-                );
+                _navigateFromDrawer(context, const MyActivityScreen());
               },
             ),
             ListTile(
@@ -46,10 +53,7 @@ class AppNavigationDrawer extends StatelessWidget {
                 style: TextStyle(color: Colors.white60),
               ),
               onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PlanTrekScreen()),
-                );
+                _navigateFromDrawer(context, const PlanTrekScreen());
               },
             ),
             ListTile(
@@ -60,10 +64,7 @@ class AppNavigationDrawer extends StatelessWidget {
                 style: TextStyle(color: Colors.white60),
               ),
               onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const HowItWorksScreen()),
-                );
+                _navigateFromDrawer(context, const HowItWorksScreen());
               },
             ),
           ],

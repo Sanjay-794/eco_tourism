@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:eco_tourism/services/weather_service.dart';
+import 'package:eco_tourism/services/location_state_service.dart';
 
 class PlanTrekScreen extends StatefulWidget {
   const PlanTrekScreen({super.key});
@@ -21,7 +22,18 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
   @override
   void initState() {
     super.initState();
-    // Show all available treks initially from Firestore.
+    _initializePlanScreen();
+  }
+
+  Future<void> _initializePlanScreen() async {
+    try {
+      // Match Home screen flow by attempting location before first suggestions.
+      await _ensureCurrentPosition();
+    } catch (_) {
+      // Keep suggestion flow resilient when location isn't ready yet.
+    }
+
+    if (!mounted) return;
     _planTrek();
   }
 
@@ -47,23 +59,62 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
       return;
     }
 
-    _currentPosition = await Geolocator.getCurrentPosition();
+    final lastKnown = await Geolocator.getLastKnownPosition();
+    if (lastKnown != null) {
+      _currentPosition = lastKnown;
+      LocationStateService.setLastLocation(lastKnown.latitude, lastKnown.longitude);
+      return;
+    }
+
+    _currentPosition = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+      timeLimit: const Duration(seconds: 12),
+    );
+
+    LocationStateService.setLastLocation(
+      _currentPosition!.latitude,
+      _currentPosition!.longitude,
+    );
+  }
+
+  double? _calculateDistanceKm(double trailLat, double trailLng) {
+    final originLat =
+        _currentPosition?.latitude ?? LocationStateService.getLastLocation()?.$1;
+    final originLng =
+        _currentPosition?.longitude ?? LocationStateService.getLastLocation()?.$2;
+
+    if (originLat == null || originLng == null) return null;
+
+    return Geolocator.distanceBetween(
+          originLat,
+          originLng,
+          trailLat,
+          trailLng,
+        ) /
+        1000;
   }
 
   double? _calculatedDistanceFromCurrent(Map<String, dynamic> trail) {
-    if (_currentPosition == null) return null;
-    final lat = (trail['lat'] as num?)?.toDouble();
-    final lng = (trail['lng'] as num?)?.toDouble();
+    final lat = _trailLat(trail);
+    final lng = _trailLng(trail);
     if (lat == null || lng == null) return null;
 
-    // Same approach used in Home screen map calculation.
-    final meters = Geolocator.distanceBetween(
-      _currentPosition!.latitude,
-      _currentPosition!.longitude,
-      lat,
-      lng,
-    );
-    return meters / 1000;
+    // Same approach as Home screen: geodesic distance between current location and trail.
+    return _calculateDistanceKm(lat, lng);
+  }
+
+  double? _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value.trim());
+    return null;
+  }
+
+  double? _trailLat(Map<String, dynamic> trail) {
+    return _toDouble(trail['lat']) ?? _toDouble(trail['latitude']);
+  }
+
+  double? _trailLng(Map<String, dynamic> trail) {
+    return _toDouble(trail['lng']) ?? _toDouble(trail['longitude']);
   }
 
   String _trailStatus(Map<String, dynamic> trail) {
@@ -82,6 +133,12 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
   String _normalizeStatus(String status) {
     if (status == 'CAUTION') return 'RISKY';
     return status;
+  }
+
+  Color _statusColor(String status) {
+    if (status == 'DANGER') return Colors.redAccent;
+    if (status == 'RISKY') return Colors.amber;
+    return Colors.greenAccent;
   }
 
   String _statusFromWeather(Map<String, dynamic>? weather) {
@@ -149,8 +206,8 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
   }
 
   Future<Map<String, dynamic>> _enrichTrail(Map<String, dynamic> trail) async {
-    final lat = (trail['lat'] as num?)?.toDouble();
-    final lng = (trail['lng'] as num?)?.toDouble();
+    final lat = _trailLat(trail);
+    final lng = _trailLng(trail);
 
     trail['calculatedDistanceKm'] = _calculatedDistanceFromCurrent(trail);
 
@@ -181,9 +238,40 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
     });
 
     try {
-      await _ensureCurrentPosition();
+      // Only location-dependent filtering needs current GPS. If it fails, continue
+      // without distance filtering instead of failing the whole suggestion flow.
+      if (maxDistance != null) {
+        try {
+          await _ensureCurrentPosition();
+        } catch (e) {
+          debugPrint('[PLAN TREK] Location unavailable on device: $e');
+        }
 
-      final snapshot = await FirebaseFirestore.instance.collection('trails').get();
+        final sharedLocation = LocationStateService.getLastLocation();
+        if (_currentPosition == null && sharedLocation == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Open Home once to detect location, then filter by distance in Plan My Trek.'),
+              ),
+            );
+          }
+          setState(() {
+            _suggestedTrails = [];
+          });
+          return;
+        }
+      }
+
+      QuerySnapshot<Map<String, dynamic>> snapshot;
+      try {
+        snapshot = await FirebaseFirestore.instance.collection('trails').get();
+      } on FirebaseException catch (e) {
+        debugPrint('[PLAN TREK] Firestore server read failed: ${e.code} ${e.message}');
+        snapshot = await FirebaseFirestore.instance
+            .collection('trails')
+            .get(const GetOptions(source: Source.cache));
+      }
       final trails = snapshot.docs.map<Map<String, dynamic>>((doc) {
         final data = doc.data();
         return {
@@ -192,7 +280,19 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
         };
       }).toList();
 
-      final enriched = await Future.wait(trails.map(_enrichTrail));
+      final enriched = await Future.wait(
+        trails.map((trail) async {
+          try {
+            return await _enrichTrail(trail);
+          } catch (_) {
+            trail['calculatedDistanceKm'] = null;
+            trail['calculatedStatus'] = _normalizeStatus(
+              (trail['baseStatus'] ?? 'UNKNOWN').toString().toUpperCase(),
+            );
+            return trail;
+          }
+        }),
+      );
 
       final filtered = enriched.where((trail) {
         final status = _trailStatus(trail);
@@ -202,7 +302,8 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
         final statusOk = _selectedStatus == 'ANY' || status == _selectedStatus;
         final difficultyOk =
             _selectedDifficulty == 'ANY' || difficulty == _selectedDifficulty;
-        final distanceOk = maxDistance == null || distance == null || distance <= maxDistance;
+        final distanceOk =
+          maxDistance == null || (distance != null && distance <= maxDistance);
 
         return statusOk && difficultyOk && distanceOk;
       }).toList();
@@ -344,8 +445,10 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
               final status = _trailStatus(trail);
               final difficulty = _trailDifficulty(trail);
               final distance = (trail['calculatedDistanceKm'] as num?)?.toDouble();
+              final statusColor = _statusColor(status);
 
               return Container(
+                width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -356,20 +459,63 @@ class _PlanTrekScreenState extends State<PlanTrekScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: statusColor.withValues(alpha: 0.45)),
+                          ),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Difficulty',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                        Text(
+                          difficulty,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
-                    Text('Status: $status', style: const TextStyle(color: Colors.white70)),
-                    Text('Difficulty: $difficulty', style: const TextStyle(color: Colors.white70)),
-                    Text(
-                      'Distance: ${distance != null ? '${distance.toStringAsFixed(1)} km' : 'N/A'}',
-                      style: const TextStyle(color: Colors.white70),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Distance',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                        Text(
+                          distance != null ? '${distance.toStringAsFixed(1)} km' : 'N/A',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                      ],
                     ),
                   ],
                 ),

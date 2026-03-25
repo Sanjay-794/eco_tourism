@@ -207,7 +207,6 @@ class MainScreen extends StatelessWidget {
         children: [
           CustomAppBar(
             title: 'EMERGENCY',
-            onMenuTap: () => Scaffold.of(context).openDrawer(),
           ),
           Expanded(
             child: SafeArea(
