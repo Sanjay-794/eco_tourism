@@ -27,6 +27,7 @@ class _NavigationScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
 
       body: screens[index],
 

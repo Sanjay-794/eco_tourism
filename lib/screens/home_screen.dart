@@ -21,7 +21,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 /// State Class (IMPORTANT: All mutable state goes here)
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Stores currently selected trail (null initially)
   Map<String, dynamic>? selectedTrail;
@@ -41,6 +41,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Timer? debounce;
   String? _checkedInTrailId;
+  bool _hasCenteredMap = false;
+  bool _isLocating = false;
+  String _gpsStateLabel = 'GPS: Unknown';
 
 
   /// search locations
@@ -183,8 +186,24 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _getLocation();
     _loadCheckedInTrailId();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _getLocation();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    debounce?.cancel();
+    searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCheckedInTrailId() async {
@@ -231,10 +250,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _getLocation() async {
+    if (mounted) {
+      setState(() {
+        _isLocating = true;
+        _gpsStateLabel = 'GPS: Checking...';
+      });
+    }
+
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         _restoreCachedLocation();
+        if (mounted) {
+          setState(() {
+            _gpsStateLabel = currentLocation != null ? 'GPS: Cached' : 'GPS: Off';
+            _isLocating = false;
+          });
+        }
         _showLocationMessage('Location service is disabled. Enable GPS for live route and distance.');
         return currentLocation != null;
       }
@@ -247,12 +279,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (permission == LocationPermission.denied) {
         _restoreCachedLocation();
+        if (mounted) {
+          setState(() {
+            _gpsStateLabel = currentLocation != null ? 'GPS: Cached' : 'GPS: Denied';
+            _isLocating = false;
+          });
+        }
         _showLocationMessage('Location permission denied. Grant permission to calculate route and distance.');
         return currentLocation != null;
       }
 
       if (permission == LocationPermission.deniedForever) {
         _restoreCachedLocation();
+        if (mounted) {
+          setState(() {
+            _gpsStateLabel = currentLocation != null ? 'GPS: Cached' : 'GPS: Blocked';
+            _isLocating = false;
+          });
+        }
         _showLocationMessage('Location permission is permanently denied. Enable it from app settings.');
         return currentLocation != null;
       }
@@ -265,18 +309,48 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return false;
       setState(() {
         currentLocation = LatLng(position.latitude, position.longitude);
+        _gpsStateLabel = 'GPS: Live';
+        _isLocating = false;
       });
 
       LocationStateService.setLastLocation(position.latitude, position.longitude);
       mapController.move(currentLocation!, 13);
+      _hasCenteredMap = true;
       return true;
     } catch (_) {
       _restoreCachedLocation();
+      if (mounted) {
+        setState(() {
+          _gpsStateLabel = currentLocation != null ? 'GPS: Cached' : 'GPS: Error';
+          _isLocating = false;
+        });
+      }
       _showLocationMessage(
         'Unable to fetch current location. On web, allow browser location and use HTTPS or localhost.',
       );
       return currentLocation != null;
     }
+  }
+
+  Future<void> _onLocateMePressed() async {
+    final success = await _getLocation();
+    if (!mounted) return;
+
+    if (success && currentLocation != null) {
+      mapController.move(currentLocation!, 14);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Location updated: ${currentLocation!.latitude.toStringAsFixed(5)}, ${currentLocation!.longitude.toStringAsFixed(5)}',
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Current location unavailable. Check GPS and permissions.')),
+    );
   }
 
   Future<List<LatLng>> _buildRouteTo(LatLng destination) async {
@@ -302,6 +376,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       currentLocation = LatLng(cached.$1, cached.$2);
     });
+
+    if (!_hasCenteredMap) {
+      mapController.move(currentLocation!, 13);
+      _hasCenteredMap = true;
+    }
   }
 
   void _showLocationMessage(String message) {
@@ -328,14 +407,20 @@ class _HomeScreenState extends State<HomeScreen> {
               options: MapOptions(
                 initialCenter: LatLng(32.2432, 77.1892),
                 initialZoom: 10,
+                onPositionChanged: (position, hasGesture) {
+                  // Hide the bottom card while user is actively panning/zooming the map.
+                  if (hasGesture && selectedTrail != null) {
+                    setState(() {
+                      selectedTrail = null;
+                    });
+                  }
+                },
 
                 onTap: (tapPosition, point) async {
 
                   setState(() {
-                    selectedTrail = {
-                      "lat": point.latitude,
-                      "lng": point.longitude,
-                    };
+                    selectedTrail = null;
+                    locationName = '';
                     weatherData = null;
                     routePoints = [];
                   });
@@ -350,11 +435,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
 
                     setState(() {
+                      selectedTrail = {
+                        "lat": point.latitude,
+                        "lng": point.longitude,
+                      };
                       weatherData = weather;
                       routePoints = route;
                     });
 
                   } catch (e) {
+                    setState(() {
+                      selectedTrail = {
+                        "lat": point.latitude,
+                        "lng": point.longitude,
+                      };
+                      if (locationName.isEmpty) {
+                        locationName =
+                            '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+                      }
+                    });
                     print(e);
                   }
                 },
@@ -362,12 +461,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
               children: [
 
-                /// OpenTopoMap tiles (better suited for hiking/trekking terrain)
+                /// Base OSM tiles kept slightly muted so highlighted trek lines stand out.
                 TileLayer(
-                  urlTemplate: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   subdomains: const ['a', 'b', 'c'],
-                  maxNativeZoom: 17,
-                  maxZoom: 17,
+                  maxNativeZoom: 19,
+                  maxZoom: 19,
+                  tileDisplay: const TileDisplay.instantaneous(opacity: 0.78),
                   userAgentPackageName: 'com.example.eco_tourism',
                 ),
 
@@ -378,24 +478,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   maxZoom: 18,
                   userAgentPackageName: 'com.example.eco_tourism',
                   tileDimension: 256,
+                  tileDisplay: const TileDisplay.instantaneous(opacity: 0.95),
                 ),
 
-                /// ================= ROUTE TO TRAIL START =================
-                /// Renders the calculated route from current location to trail start
+                /// Single end-to-end route highlight from source to destination.
                 PolylineLayer<Object>(
                   polylines: routePoints.isNotEmpty
                       ? [
-                    /// Outer stroke for visibility (darker outline)
-                    Polyline(
-                      points: routePoints,
-                      strokeWidth: 8,
-                      color: Colors.black.withOpacity(0.6),
-                    ),
-                    /// Inner bright route (main highlight)
                     Polyline(
                       points: routePoints,
                       strokeWidth: 5,
-                      color: Colors.yellow,
+                      color: Colors.yellowAccent,
                     ),
                   ]
                       : [],
@@ -426,7 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       print("📍 Data: ${doc.data()}");
                     }
 
-                    if (docs.isNotEmpty) {
+                    if (!_hasCenteredMap && docs.isNotEmpty) {
                       final first = docs.first.data();
 
                       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -437,6 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           13,
                         );
+                        _hasCenteredMap = true;
                       });
                     }
 
@@ -590,7 +684,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Required map attribution for OpenTopoMap and source data.
+          // Required map attribution for OSM and Waymarked Trails sources.
           Positioned.fill(
             child: IgnorePointer(
               child: Padding(
@@ -604,7 +698,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
-                      'Map data: OpenStreetMap contributors, SRTM | Map style: OpenTopoMap',
+                      'Map data: OpenStreetMap contributors | Overlay: Waymarked Trails',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -621,7 +715,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned.fill(
             child: IgnorePointer(
             child: Container(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withOpacity(0.16),
             ),
           ),
           ),
@@ -889,18 +983,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
                         const SizedBox(height: 12),
 
-                        /// Info Chips (static for now)
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            _chip("68°F"),
-                            _chip("Difficulty"),
-                            _chip("Cell Service"),
-                          ],
-                        ),
-
-                        const SizedBox(height: 12),
-
                         /// Action Button
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(
@@ -1010,26 +1092,52 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
     ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+            right: 16,
+            bottom: selectedTrail != null ? 320 : 88,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Text(
+                    _gpsStateLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                FloatingActionButton.small(
+                  heroTag: 'locate_me_btn',
+                  backgroundColor: Colors.greenAccent,
+                  foregroundColor: Colors.black,
+                  onPressed: _isLocating ? null : _onLocateMePressed,
+                  child: _isLocating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
 
     );
   }
 
-  /// ================= CHIP WIDGET =================
-  /// Reusable small info container
-  Widget _chip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(color: Colors.white),
-      ),
-    );
-  }
 }
 

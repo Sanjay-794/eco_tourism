@@ -102,6 +102,12 @@ class _TrekDetailsState extends State<TrekDetails> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  double? _toDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
+  }
+
   String _safetyFromWeather(String baseStatus, Map<String, dynamic>? weather) {
     if (weather == null) {
       final normalized = baseStatus.toUpperCase();
@@ -161,7 +167,7 @@ class _TrekDetailsState extends State<TrekDetails> {
 
     final rain = weather['rain'];
     if (rain is Map && rain['1h'] != null) {
-      final mm = (rain['1h'] as num).toDouble();
+      final mm = _toDouble(rain['1h']) ?? 0;
       return (mm * 20).clamp(0, 100).round();
     }
 
@@ -176,7 +182,8 @@ class _TrekDetailsState extends State<TrekDetails> {
 
     final clouds = weather['clouds'];
     if (clouds is Map && clouds['all'] != null) {
-      return (clouds['all'] as num).round().clamp(0, 100);
+      final cloudPercent = _toDouble(clouds['all']) ?? 0;
+      return cloudPercent.round().clamp(0, 100);
     }
 
     return 0;
@@ -184,7 +191,7 @@ class _TrekDetailsState extends State<TrekDetails> {
 
   bool _hasSevereWeather(Map<String, dynamic>? weather) {
     if (weather == null) return false;
-    final temp = ((weather['main'] as Map?)?['temp'] as num?)?.toDouble();
+    final temp = _toDouble((weather['main'] as Map?)?['temp']);
     final rainPercent = _rainPercentValue(weather);
 
     final veryLowTemp = temp != null && temp < 0;
@@ -195,7 +202,7 @@ class _TrekDetailsState extends State<TrekDetails> {
   String _alertReason(Map<String, dynamic>? weather) {
     if (weather == null) return 'Unsafe weather conditions';
 
-    final temp = ((weather['main'] as Map?)?['temp'] as num?)?.toDouble();
+    final temp = _toDouble((weather['main'] as Map?)?['temp']);
     final rainPercent = _rainPercentValue(weather);
 
     if (temp != null && temp < 0 && rainPercent > 60) {
@@ -405,6 +412,7 @@ class _TrekDetailsState extends State<TrekDetails> {
           }
 
           return ListView.builder(
+            physics: const ClampingScrollPhysics(),
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: docs.length,
             itemBuilder: (context, index) {
@@ -414,8 +422,8 @@ class _TrekDetailsState extends State<TrekDetails> {
               final baseStatus = (data['baseStatus'] ?? 'SAFE').toString();
               final checkInCountValue = _toCheckInCount(data['checkInCount']);
               final checkInCount = checkInCountValue.toString();
-              final lat = (data['lat'] as num?)?.toDouble();
-              final lng = (data['lng'] as num?)?.toDouble();
+              final lat = _toDouble(data['lat']);
+              final lng = _toDouble(data['lng']);
               final updatedAt = _formatDate(data['lastUpdated']);
               final trailBg = (data['trailBg'] ?? '').toString();
               final aboutTrail = (data['aboutTrail'] ??
