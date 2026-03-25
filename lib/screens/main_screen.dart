@@ -363,8 +363,8 @@ class MainScreen extends StatelessWidget {
     required String serviceType,
     required String phoneNumber,
   }) {
-    const coralColor = Color(0xFFFF7F6B);
-    
+    const callAccent = Color(0xFFFF7F6B);
+
     return Container(
       margin:
           const EdgeInsets.only(bottom: 12),
@@ -373,7 +373,7 @@ class MainScreen extends StatelessWidget {
         color: const Color(0xFF1A1A1A),
         borderRadius:
             BorderRadius.circular(20),
-        border: Border.all(color: coralColor, width: 1.5),
+        border: Border.all(color: Colors.white12),
       ),
       child: Column(
         crossAxisAlignment:
@@ -385,7 +385,7 @@ class MainScreen extends StatelessWidget {
             children: [
               Icon(
                 _cardIcon(title),
-                color: coralColor,
+                color: Colors.white70,
               ),
               Text(
                 serviceType,
@@ -422,8 +422,8 @@ class MainScreen extends StatelessWidget {
 
           OutlinedButton(
             style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: coralColor, width: 1.5),
-              foregroundColor: coralColor,
+              side: const BorderSide(color: callAccent),
+              foregroundColor: callAccent,
               minimumSize: const Size.fromHeight(42),
             ),
             onPressed: () => _callNumber(context, phoneNumber),

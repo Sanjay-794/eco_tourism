@@ -144,9 +144,46 @@ class _EcoCalculatorState extends State<EcoCalculator> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // CHANGED: Main Heading Color to greenAccent
-                      const Text("Footprint\nCalculator", 
-                        style: TextStyle(color: Colors.greenAccent, fontSize: 34, fontWeight: FontWeight.bold, height: 1.1)),
+                      Row(
+                        children: const [
+                          Icon(Icons.eco, color: Colors.greenAccent, size: 18),
+                          SizedBox(width: 8),
+                          Text(
+                            "ECO CALCULATOR",
+                            style: TextStyle(
+                              color: Colors.greenAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      RichText(
+                        text: const TextSpan(
+                          children: [
+                            TextSpan(
+                              text: "Footprint\n",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 34,
+                                fontWeight: FontWeight.bold,
+                                height: 1.1,
+                              ),
+                            ),
+                            TextSpan(
+                              text: "Calculator",
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 34,
+                                fontWeight: FontWeight.bold,
+                                height: 1.1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 12),
                       const Text("Measure the environmental impact of your travel to the trailhead.", 
                         style: TextStyle(color: Colors.white54, fontSize: 14)),
