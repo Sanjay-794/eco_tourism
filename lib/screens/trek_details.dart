@@ -104,7 +104,8 @@ class _TrekDetailsState extends State<TrekDetails> {
 
   String _safetyFromWeather(String baseStatus, Map<String, dynamic>? weather) {
     if (weather == null) {
-      return baseStatus.toUpperCase();
+      final normalized = baseStatus.toUpperCase();
+      return normalized == 'CAUTION' ? 'RISKY' : normalized;
     }
 
     final weatherList = weather['weather'];
@@ -121,18 +122,19 @@ class _TrekDetailsState extends State<TrekDetails> {
           condition == 'Mist' ||
           condition == 'Fog' ||
           condition == 'Haze') {
-        return 'CAUTION';
+        return 'RISKY';
       }
 
       return 'SAFE';
     }
 
-    return baseStatus.toUpperCase();
+    final normalized = baseStatus.toUpperCase();
+    return normalized == 'CAUTION' ? 'RISKY' : normalized;
   }
 
   Color _statusColor(String status) {
     if (status == 'DANGER') return Colors.redAccent;
-    if (status == 'CAUTION') return Colors.amber;
+    if (status == 'RISKY') return Colors.amber;
     return Colors.greenAccent;
   }
 
@@ -151,26 +153,6 @@ class _TrekDetailsState extends State<TrekDetails> {
     if (main is Map && main['temp'] != null) {
       return '${main['temp']}°C';
     }
-    return '--';
-  }
-
-  String _rainLabel(Map<String, dynamic>? weather) {
-    if (weather == null) return '--';
-
-    final rain = weather['rain'];
-    if (rain is Map && rain['1h'] != null) {
-      return '${rain['1h']} mm';
-    }
-
-    final weatherList = weather['weather'];
-    if (weatherList is List && weatherList.isNotEmpty) {
-      final condition = (weatherList.first['main'] ?? '').toString();
-      if (condition == 'Rain' || condition == 'Thunderstorm') {
-        return 'Yes';
-      }
-      return 'No';
-    }
-
     return '--';
   }
 
@@ -457,7 +439,7 @@ class _TrekDetailsState extends State<TrekDetails> {
               if (weatherLoading) {
                 weatherText = 'Loading weather...';
               } else if (weather != null && weather['main'] is Map) {
-                weatherText = '${(weather['main']['temp'] ?? '--')}°C';
+                weatherText = '${(weather['main']['temp'] ?? '--')}°C  |  Rain ${_rainPercentValue(weather)}%';
               }
 
               return GestureDetector(
@@ -678,7 +660,7 @@ class _TrekDetailsState extends State<TrekDetails> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        'Rain: ${_rainLabel(weather)}',
+                                        'Rain: ${_rainPercentValue(weather)}%',
                                         style: const TextStyle(
                                           color: Colors.white70,
                                           fontSize: 14,
