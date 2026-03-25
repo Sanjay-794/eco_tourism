@@ -230,38 +230,85 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _getLocation() async {
+  Future<bool> _getLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _restoreCachedLocation();
+        _showLocationMessage('Location service is disabled. Enable GPS for live route and distance.');
+        return currentLocation != null;
+      }
 
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      print("Location services are disabled");
-      return;
+      var permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied) {
+        _restoreCachedLocation();
+        _showLocationMessage('Location permission denied. Grant permission to calculate route and distance.');
+        return currentLocation != null;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        _restoreCachedLocation();
+        _showLocationMessage('Location permission is permanently denied. Enable it from app settings.');
+        return currentLocation != null;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 12),
+      );
+
+      if (!mounted) return false;
+      setState(() {
+        currentLocation = LatLng(position.latitude, position.longitude);
+      });
+
+      LocationStateService.setLastLocation(position.latitude, position.longitude);
+      mapController.move(currentLocation!, 13);
+      return true;
+    } catch (_) {
+      _restoreCachedLocation();
+      _showLocationMessage(
+        'Unable to fetch current location. On web, allow browser location and use HTTPS or localhost.',
+      );
+      return currentLocation != null;
+    }
+  }
+
+  Future<List<LatLng>> _buildRouteTo(LatLng destination) async {
+    if (currentLocation == null) {
+      await _getLocation();
     }
 
-    LocationPermission permission = await Geolocator.checkPermission();
-
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+    if (currentLocation == null) {
+      return [];
     }
 
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      return;
+    try {
+      return await RouteService().getRoute(currentLocation!, destination);
+    } catch (_) {
+      return [];
     }
+  }
 
-    final position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-      timeLimit: const Duration(seconds: 12),
-    );
+  void _restoreCachedLocation() {
+    final cached = LocationStateService.getLastLocation();
+    if (cached == null || !mounted) return;
 
     setState(() {
-      currentLocation = LatLng(position.latitude, position.longitude);
+      currentLocation = LatLng(cached.$1, cached.$2);
     });
+  }
 
-    LocationStateService.setLastLocation(position.latitude, position.longitude);
-
-    // ✅ Move map AFTER getting location
-    mapController.move(currentLocation!, 13);
+  void _showLocationMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -298,8 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     final weather = await WeatherService()
                         .getWeather(point.latitude, point.longitude);
 
-                    final route = await RouteService().getRoute(
-                      currentLocation!,
+                    final route = await _buildRouteTo(
                       LatLng(point.latitude, point.longitude),
                     );
 
@@ -424,8 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 final weather = await WeatherService()
                                     .getWeather(data['lat'], data['lng']);
 
-                                final route = await RouteService().getRoute(
-                                  currentLocation!,
+                                final route = await _buildRouteTo(
                                   LatLng(data['lat'], data['lng']),
                                 );
 
@@ -721,12 +766,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               final weather = await WeatherService()
                                   .getWeather(lat, lng);
 
-                              if (currentLocation == null) return;
-
-                              final route = await RouteService().getRoute(
-                                currentLocation!,
-                                point,
-                              );
+                              final route = await _buildRouteTo(point);
 
                               setState(() {
                                 weatherData = weather;
