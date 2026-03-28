@@ -98,6 +98,8 @@ TrailService builds a local graph from Overpass responses and tries end-to-end s
 
 ## Setup
 
+Follow the setup:
+
 ### Prerequisites
 
 - Flutter SDK (compatible with Dart >= 3.3.0 < 4.0.0)
